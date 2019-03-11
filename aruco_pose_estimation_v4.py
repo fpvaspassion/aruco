@@ -138,6 +138,9 @@ parser.add_option("--source-system", dest='SOURCE_SYSTEM', type='int',
 parser.add_option("-v", "--verbose",
                   action="store_true", dest="showmessages", default=False,
                   help="Print status messages to stdout")
+parser.add_option("-s", "--show",
+                  action="store_true", dest="showvideo", default=False,
+                  help="Show video from camera to frame")
 
 (opts, args) = parser.parse_args()
 
@@ -219,7 +222,7 @@ while True:
          else :
               first_loop = False
     ### Display the frame
-    if opts.showmessages:
+    if opts.showvideo:
          cv2.imshow('frame', frame)
          ### use 'q' to quit
          key = cv2.waitKey(1) & 0xFF
