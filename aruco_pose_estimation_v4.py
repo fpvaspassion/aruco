@@ -26,6 +26,8 @@ yaw_mark_detected = False
 start_time = datetime.now()
 first_loop = True
 yaw_camera = 0
+altitude_amsl = 0
+altitude_amsl_updated = False
 
 ### 180 deg rotation matrix around the x axis
 R_flip  = np.zeros((3,3), dtype=np.float32)
@@ -93,7 +95,7 @@ def rotationMatrixToEulerAngles(R):
 
 ### Handle incomig Attitude message from PX4
 def handle_attitude(msg):
-         global yaw_mark_detected, yaw_mark, yaw_cam, opts
+         global attitude_mav, yaw_mark_detected, yaw_mark, yaw_cam, opts
          attitude_mav = (msg.roll, msg.pitch, msg.yaw, msg.rollspeed, 
 				msg.pitchspeed, msg.yawspeed)
          ### Show reseived information
@@ -103,13 +105,27 @@ def handle_attitude(msg):
 	      print "%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t" % attitude_mav
          ### if first loop - clculate yaw for mark
          if yaw_mark_detected and yaw_mark == 5:
-              yaw_mark = attitude_mav[2] + yaw_cam
+              yaw_mark = attitude_mav[2] - yaw_cam
               yaw_mark_detected = True
-              if opts.showmessages:
-                   print ("Copter yaw        = %4.2f" % attitude_mav[2])
-                   print ("Cam yaw           = %4.2f" % yaw_cam)              
-                   print ("Mark yaw detected = %4.2f" % yaw_mark)
-             
+              #if opts.showmessages:
+              print ("Copter yaw        = %4.2f" % attitude_mav[2])
+              print ("Cam yaw           = %4.2f" % yaw_cam)              
+              print ("Mark yaw detected = %4.2f" % yaw_mark)
+def handle_hud(msg):
+         global altitude_amsl, altitude_amsl_updated
+         hud_data = (msg.airspeed, msg.groundspeed, msg.heading, 
+				msg.throttle, msg.alt, msg.climb)
+         if opts.showmessages:
+              print ("MSG type= VFR_NUD")
+              print "Aspd\tGspd\tHead\tThro\tAlt\tClimb"
+              print "%0.2f\t%0.2f\t%0.2f\t%0.2f\t%0.2f\t%0.2f" % hud_data
+         try:
+              altitude_amsl = hud_data[4]
+              altitude_amsl_updated = True
+         except:
+              altitude_amsl_updated = False
+
+   
 ### Get the camera calibration path
 camera_matrix   = np.loadtxt(calib_path + calibration_file, delimiter=',')
 camera_distortion   = np.loadtxt(calib_path + distortion_file, delimiter=',')
@@ -148,6 +164,10 @@ if opts.device is None:
     print("You must specify a serial device")
     sys.exit(1)
 
+if opts.showmessages:
+    print ("Starting with display messages")
+else:
+    print ("Starting with no msg messages")
 ### create a mavlink serial instance
 master = mavutil.mavlink_connection(opts.device, baud=opts.baudrate)
 
@@ -175,7 +195,8 @@ while True:
          # print ("MSG type=" + msg_type)
          if msg_type == "ATTITUDE":
               handle_attitude(msg)
-    	
+         elif msg_type == "VFR_HUD":
+              handle_hud(msg)    	
     ### Print timestamp
     delta_time= delta_millis()    
     if opts.showmessages:
@@ -191,6 +212,7 @@ while True:
     ### Find all the aruco markers in the image
     corners, ids, rejected = aruco.detectMarkers(image=gray, dictionary=aruco_dict, parameters=parameters,
                               cameraMatrix=camera_matrix, distCoeff=camera_distortion)
+
     ### Check for marker ID
     if ids is not None and ids[0] == id_to_find:
          ### alow to calculate real mark yaw
@@ -210,19 +232,23 @@ while True:
          ### Position and attitude of the camera respect to the marker
          pos_camera_cm = -R_tc*np.matrix(tvec).T
          pitch_cam, yaw_cam, roll_cam = rotationMatrixToEulerAngles(R_flip*R_tc)
+         #print ("Att pitch=%4.2f yaw=%4.2f roll=%4.2f" % (pitch_cam, yaw_cam, roll_cam))
 	 if not first_loop :
-              if yaw_mark_detected:
+              if yaw_mark_detected and altitude_amsl_updated:
                    ### Calc copter yaw angle
-                   yaw_copter=attitude_mav[2]+yaw_mark
-		   ### Convert to NED and meters
-		   p_x_cm, p_y_cm = uav_to_ne(pos_camera_cm[0], pos_camera_cm[1], yaw_copter)
-                   p_z_cm = pos_camera_cm[2]
+                   yaw_copter= yaw_mark + yaw_cam
+		   ### Convert to NED and meters and include copter baro alt
+		   p_x_cm, p_y_cm = uav_to_ne(pos_camera_cm[0], pos_camera_cm[2], yaw_copter)
+                   p_z_m = altitude_amsl + 0.01 * pos_camera_cm[1]
                    ### Send data to FC position is NED
-		   master.mav.vision_position_estimate_send(delta_time, p_x_cm * 0.01, p_y_cm * 0.01, p_z_cm * 0.01, roll_cam, pitch_cam, yaw_copter)	
-         else :
+		   master.mav.vision_position_estimate_send(delta_time, p_x_cm * 0.01, p_y_cm * 0.01, p_z_m, roll_cam, pitch_cam, yaw_copter)
+                   #print ("Mark X=%4.2f Y=%4.2f Z=%4.2f" % (pos_camera_cm[0], pos_camera_cm[2], pos_camera_cm[1]))
+                   #print ("Alt=%4.2f Z=%4.2f" % (altitude_amsl, 0.01 * pos_camera_cm[1]))
+                   print("Mark X=%4.2f Y=%4.2f Z=%4.2f Sent X=%4.2f Y=%4.2f Z=%4.2f Yaw_mark=%4.2f Yaw_mav=%4.2F Yaw_copter=%4.2f" % (pos_camera_cm[0], pos_camera_cm[2], pos_camera_cm[1], p_x_cm, p_y_cm, p_z_m, yaw_mark, attitude_mav[2], yaw_copter))
+         else:
               first_loop = False
     ### Display the frame
-    if opts.showvideo:
+    if opts.showvideo:	
          cv2.imshow('frame', frame)
          ### use 'q' to quit
          key = cv2.waitKey(1) & 0xFF
