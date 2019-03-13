@@ -107,10 +107,10 @@ def handle_attitude(msg):
          if yaw_mark_detected and yaw_mark == 5:
               yaw_mark = attitude_mav[2] - yaw_cam
               yaw_mark_detected = True
-              #if opts.showmessages:
-              print ("Copter yaw        = %4.2f" % attitude_mav[2])
-              print ("Cam yaw           = %4.2f" % yaw_cam)              
-              print ("Mark yaw detected = %4.2f" % yaw_mark)
+              if opts.showmessages:
+                   print ("Copter yaw        = %4.2f" % attitude_mav[2])
+                   print ("Cam yaw           = %4.2f" % yaw_cam)              
+                   print ("Mark yaw detected = %4.2f" % yaw_mark)
 def handle_hud(msg):
          global altitude_amsl, altitude_amsl_updated
          hud_data = (msg.airspeed, msg.groundspeed, msg.heading, 
@@ -166,8 +166,7 @@ if opts.device is None:
 
 if opts.showmessages:
     print ("Starting with display messages")
-else:
-    print ("Starting with no msg messages")
+
 ### create a mavlink serial instance
 master = mavutil.mavlink_connection(opts.device, baud=opts.baudrate)
 
@@ -232,7 +231,8 @@ while True:
          ### Position and attitude of the camera respect to the marker
          pos_camera_cm = -R_tc*np.matrix(tvec).T
          pitch_cam, yaw_cam, roll_cam = rotationMatrixToEulerAngles(R_flip*R_tc)
-         #print ("Att pitch=%4.2f yaw=%4.2f roll=%4.2f" % (pitch_cam, yaw_cam, roll_cam))
+         if opts.showmessages:
+                   print ("Att pitch=%4.2f yaw=%4.2f roll=%4.2f" % (pitch_cam, yaw_cam, roll_cam))
 	 if not first_loop :
               if yaw_mark_detected and altitude_amsl_updated:
                    ### Calc copter yaw angle
@@ -242,9 +242,10 @@ while True:
                    p_z_m = altitude_amsl + 0.01 * pos_camera_cm[1]
                    ### Send data to FC position is NED
 		   master.mav.vision_position_estimate_send(delta_time, p_x_cm * 0.01, p_y_cm * 0.01, p_z_m, roll_cam, pitch_cam, yaw_copter)
-                   #print ("Mark X=%4.2f Y=%4.2f Z=%4.2f" % (pos_camera_cm[0], pos_camera_cm[2], pos_camera_cm[1]))
-                   #print ("Alt=%4.2f Z=%4.2f" % (altitude_amsl, 0.01 * pos_camera_cm[1]))
-                   print("Mark X=%4.2f Y=%4.2f Z=%4.2f Sent X=%4.2f Y=%4.2f Z=%4.2f Yaw_mark=%4.2f Yaw_mav=%4.2F Yaw_copter=%4.2f" % (pos_camera_cm[0], pos_camera_cm[2], pos_camera_cm[1], p_x_cm, p_y_cm, p_z_m, yaw_mark, attitude_mav[2], yaw_copter))
+                   if opts.showmessages:
+                        print ("Mark X=%4.2f Y=%4.2f Z=%4.2f" % (pos_camera_cm[0], pos_camera_cm[2], pos_camera_cm[1]))
+                        print ("Alt=%4.2f Z=%4.2f" % (altitude_amsl, 0.01 * pos_camera_cm[1]))
+                        print("Mark X=%4.2f Y=%4.2f Z=%4.2f Sent X=%4.2f Y=%4.2f Z=%4.2f Yaw_mark=%4.2f Yaw_mav=%4.2F Yaw_copter=%4.2f" % (pos_camera_cm[0], pos_camera_cm[2], pos_camera_cm[1], p_x_cm, p_y_cm, p_z_m, yaw_mark, attitude_mav[2], yaw_copter))
          else:
               first_loop = False
     ### Display the frame
