@@ -120,8 +120,9 @@ def handle_hud(msg):
               print "Aspd\tGspd\tHead\tThro\tAlt\tClimb"
               print "%0.2f\t%0.2f\t%0.2f\t%0.2f\t%0.2f\t%0.2f" % hud_data
          try:
-              altitude_amsl = hud_data[4]
-              altitude_amsl_updated = True
+              if not altitude_updated:
+                   altitude_amsl = hud_data[4]
+                   altitude_amsl_updated = True
          except:
               altitude_amsl_updated = False
 
@@ -238,12 +239,12 @@ while True:
                    ### Calc copter yaw angle
                    yaw_copter= yaw_mark + yaw_cam
 		   ### Convert to NED and meters and include copter baro alt
-		   p_x_cm, p_y_cm = uav_to_ne(pos_camera_cm[0], pos_camera_cm[2], yaw_copter)
+		   p_x_cm, p_y_cm = uav_to_ne(pos_camera_cm[2], pos_camera_cm[0], yaw_copter)
                    p_z_m = altitude_amsl + 0.01 * pos_camera_cm[1]
                    ### Send data to FC position is NED
 		   master.mav.vision_position_estimate_send(delta_time, p_x_cm * 0.01, p_y_cm * 0.01, p_z_m, roll_cam, pitch_cam, yaw_copter)
                    if opts.showmessages:
-                        print ("Mark X=%4.2f Y=%4.2f Z=%4.2f" % (pos_camera_cm[0], pos_camera_cm[2], pos_camera_cm[1]))
+                        print ("Mark X=%4.2f Y=%4.2f Z=%4.2f" % (pos_camera_cm[2], pos_camera_cm[0], pos_camera_cm[1]))
                         print ("Alt=%4.2f Z=%4.2f" % (altitude_amsl, 0.01 * pos_camera_cm[1]))
                         print("Mark X=%4.2f Y=%4.2f Z=%4.2f Sent X=%4.2f Y=%4.2f Z=%4.2f Yaw_mark=%4.2f Yaw_mav=%4.2F Yaw_copter=%4.2f" % (pos_camera_cm[0], pos_camera_cm[2], pos_camera_cm[1], p_x_cm, p_y_cm, p_z_m, yaw_mark, attitude_mav[2], yaw_copter))
          else:
