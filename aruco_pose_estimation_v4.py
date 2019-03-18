@@ -241,7 +241,7 @@ while True:
                    yaw_copter= yaw_mark + yaw_cam
 		   ### Convert to NED and meters and include copter baro alt
 		   p_x_cm, p_y_cm = uav_to_ne(pos_camera_cm[2], pos_camera_cm[0], yaw_copter)
-                   p_z_m = altitude_amsl + 0.01 * pos_camera_cm[1]
+                   p_z_m = 0.01 * pos_camera_cm[1]
                    ### Send data to FC position is NED
 		   master.mav.vision_position_estimate_send(delta_time, p_x_cm * 0.01, p_y_cm * 0.01, p_z_m, roll_cam, pitch_cam, yaw_copter)
                    if opts.showmessages:
