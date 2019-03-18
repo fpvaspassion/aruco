@@ -56,7 +56,7 @@ def camera_to_uav(x_cam, y_cam):
 def uav_to_ne(x_uav, y_uav, yaw_rad):
     c       = math.cos(yaw_rad)
     s       = math.sin(yaw_rad)
-    north   = x_uav*c - y_uav*s
+    north   = -1 * (x_uav*c - y_uav*s)
     east    = x_uav*s + y_uav*c 
     return(north, east)
 
@@ -116,13 +116,14 @@ def handle_hud(msg):
          hud_data = (msg.airspeed, msg.groundspeed, msg.heading, 
 				msg.throttle, msg.alt, msg.climb)
          if opts.showmessages:
-              print ("MSG type= VFR_NUD")
+              print ("MSG type= VFR_HUD")
               print "Aspd\tGspd\tHead\tThro\tAlt\tClimb"
               print "%0.2f\t%0.2f\t%0.2f\t%0.2f\t%0.2f\t%0.2f" % hud_data
          try:
-              if not altitude_updated:
+              if not altitude_amsl_updated:
                    altitude_amsl = hud_data[4]
                    altitude_amsl_updated = True
+                   print("Altitude AMSL set to %4.2f" % altitude_amsl )
          except:
               altitude_amsl_updated = False
 
