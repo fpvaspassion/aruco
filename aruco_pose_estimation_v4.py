@@ -126,15 +126,30 @@ def handle_hud(msg):
                    print("Altitude AMSL set to %4.2f" % altitude_amsl )
          except:
               altitude_amsl_updated = False
+def handle_lpos(msg):
+         global altitude_amsl, altitude_amsl_updated
+         hud_data = (msg.airspeed, msg.groundspeed, msg.heading, 
+				msg.throttle, msg.alt, msg.climb)
+         if opts.showmessages:
+              print ("MSG type= LPOS")
+              print "Aspd\tGspd\tHead\tThro\tAlt\tClimb"
+              print "%0.2f\t%0.2f\t%0.2f\t%0.2f\t%0.2f\t%0.2f" % hud_data
+         try:
+              if not altitude_amsl_updated:
+                   altitude_amsl = hud_data[4]
+                   altitude_amsl_updated = True
+                   print("Altitude AMSL set to %4.2f" % altitude_amsl )
+         except:
+              altitude_amsl_updated = False
 
    
 ### Get the camera calibration path
-camera_matrix   = np.loadtxt(calib_path + calibration_file, delimiter=',')
-camera_distortion   = np.loadtxt(calib_path + distortion_file, delimiter=',')
+camera_matrix = np.loadtxt(calib_path + calibration_file, delimiter=',')
+camera_distortion = np.loadtxt(calib_path + distortion_file, delimiter=',')
 
 ### Define the aruco dictionary
-aruco_dict  = aruco.getPredefinedDictionary(dictionnary_to_use)
-parameters  = aruco.DetectorParameters_create()
+aruco_dict = aruco.getPredefinedDictionary(dictionnary_to_use)
+parameters = aruco.DetectorParameters_create()
 
 ### Capture the videocamera (this may also be a video or a picture)
 cap = cv2.VideoCapture(0)
@@ -159,6 +174,7 @@ parser.add_option("-v", "--verbose",
 parser.add_option("-s", "--show",
                   action="store_true", dest="showvideo", default=False,
                   help="Show video from camera to frame")
+parser.add_option("--distance", dest="distance", default=None, help="landing distance from aruco mark")
 
 (opts, args) = parser.parse_args()
 
@@ -198,6 +214,8 @@ while True:
               handle_attitude(msg)
          elif msg_type == "VFR_HUD":
               handle_hud(msg)    	
+         elif msg_type == "LPOS":
+              handle_lpos(msg)    	
     ### Print timestamp
     delta_time= delta_millis()    
     if opts.showmessages:
