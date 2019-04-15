@@ -12,3 +12,11 @@ To start application on PC  :
 To start on Odroid :
   sudo python aruco_pose_estimation_v4.py --device /dev/ttyS1 --baudrate 57600
 
+#test MAVlink
+Test program to check MAVlink exchange with PX4
+
+Typical use:
+  sudo python test_mavlink.py --baudrate 57600 --device /dev/ttyUSB0
+             --baudrate  - communication speed
+             --device    - serial device communicating with PX4 - USB for PC, ttyS... 
+
