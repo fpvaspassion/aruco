@@ -26,6 +26,7 @@ observation_start = 0
 
 ### Variables
 start_time = datetime.now()
+start_boot = datetime.now()
 first_loop = True
 yaw_camera = 0
 altitude_amsl = 0
@@ -38,10 +39,8 @@ copter_mode = 0
 ###CONSTATNS
 MIN_OBSERVATION_PERIOD = 200   #millis
 LPOS_OBSERVATION_MILLIS = 8000 #millis
-COPTER_MODE_GUIDED = 216
-COPTER_MODE_MANUAL = 208
 COPTER_SYS_ID = 1
-
+LPOS_TYPE_MASK = 8 + 16 + 32 + 64 + 128 + 256 + 2048 #Ignore velocities, accelertion and yaw rate
 ### State machine definitions
 class MainState(Enum):
     State_waiting_px       = 1
@@ -118,17 +117,20 @@ def rotationMatrixToEulerAngles(R):
          z = 0
     return np.array([x, y, z])
 
-### Handle incomig Attitude message from PX4
+### Handle incomig MAVLink messages from PX4
 def handle_attitude(msg):
          global attitude_mav, yaw_mark_detected, yaw_mark, yaw_cam, opts
+
          attitude_mav = (msg.roll, msg.pitch, msg.yaw, msg.rollspeed, 
 				msg.pitchspeed, msg.yawspeed)
-         ### Show reseived information
          if opts.showmessages:
-              print ("MSG type= ATTITUDE")
-	      #print "Roll\tPit\tYaw\tRSpd\tPSpd\tYSpd"
-	      #print "%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t" % attitude_mav
-         ### if first loop - clculate yaw for mark
+               print ("YAW=%f" % msg.yaw)
+         ### Show reseived information
+ #        if opts.showmessages:
+ #             print ("MSG type= ATTITUDE")
+ #	      #print "Roll\tPit\tYaw\tRSpd\tPSpd\tYSpd"
+ #	      #print "%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t" % attitude_mav
+ #         ### if first loop - clculate yaw for mark
  #        if yaw_mark_detected and yaw_mark == 5:
  #             yaw_mark = attitude_mav[2] - yaw_cam
  #             yaw_mark_detected = True
@@ -138,12 +140,14 @@ def handle_attitude(msg):
  #                  print ("Mark yaw detected = %4.2f" % yaw_mark)
 def handle_hud(msg):
          global altitude_amsl, altitude_amsl_updated
+
          hud_data = (msg.airspeed, msg.groundspeed, msg.heading, 
 				msg.throttle, msg.alt, msg.climb)
-         if opts.showmessages:
-              print ("MSG type= VFR_HUD")
-              #print "Aspd\tGspd\tHead\tThro\tAlt\tClimb"
-              #print "%0.2f\t%0.2f\t%0.2f\t%0.2f\t%0.2f\t%0.2f" % hud_data
+         
+         #if opts.showmessages:
+         #     print ("MSG type= VFR_HUD")
+         #     #print "Aspd\tGspd\tHead\tThro\tAlt\tClimb"
+         #     #print "%0.2f\t%0.2f\t%0.2f\t%0.2f\t%0.2f\t%0.2f" % hud_data
 		
 def handle_heartbeat(msg):
 	global copter_mode
@@ -164,7 +168,6 @@ def handle_lpos(msg):
          else:
               if opts.showmessages:
                    print ("LPOS - NO POSITION!")
-
 
 def process_mavlink():
     global master, msg, msg_type
@@ -190,18 +193,11 @@ def process_mavlink():
                    handle_lpos(msg)
          else:
               have_data = False  
-		 
 	
 def process_camera():
     global cap, master, first_loop, opts, yaw_copter, marker_visible, app_should_stop, start_time, pos_camera_cm, observation_start
     ### Reset visibility flag
     marker_visible = False
-
-    ### Print timestamp
-    delta_time= delta_millis(start_time)    
-    if opts.showmessages:
-         print ("Time delta=%d" % delta_time)
-    start_time = datetime.now()
 
     ### Read the camera frame
     ret, frame = cap.read()
@@ -269,15 +265,40 @@ def process_camera():
               app_should_stop = True
 
 def correct_lpos():
-    if opts.showmessages:
-         print("--------------------------Call of correct_lpos")
+    #if opts.showmessages:
+    #     print("--------------------------Call of correct_lpos")
+
+    new_x_m = -1.5
+    new_y_m = -0.2
+    new_z_m = -0.8
+    new_yaw = 0
 
     ###lpos.x, lpos.y, lpos.z - copter position in NED
     ###attitude_mav[2] - yaw
+
     ###pos_camera_cm - camera position 
     ###yaw_cam - copter rotation from marker
     ###master.mav.simple_goto(new_location)
-    
+
+    ### Prepare message components
+    nm_time_boot_ms = delta_millis(start_boot)
+    nm_sys_id = COPTER_SYS_ID
+    nm_sys_comp = 0
+    nm_coordinate_frame = mavutil.mavlink.MAV_FRAME_LOCAL_NED
+    nm_type_mask = LPOS_TYPE_MASK
+    nm_x = new_x_m
+    nm_y = new_y_m
+    nm_z = new_z_m
+    nm_vx = 0.0
+    nm_vy = 0.0
+    nm_vz = 0.0
+    nm_afx = 0.0
+    nm_afy = 0.0
+    nm_afz = 0.0
+    nm_yaw = new_yaw
+    nm_yawrate = 0.0
+    ### Send message
+    master.mav.set_position_target_local_ned_send(nm_time_boot_ms, nm_sys_id, nm_sys_comp, nm_coordinate_frame, nm_type_mask, nm_x, nm_y, nm_z, nm_vx, nm_vy, nm_vz, nm_afx, nm_afy, nm_afz, nm_yaw, nm_yawrate)
 
 def copter_change_mode(new_mode):
      master.mav.set_mode_send(COPTER_SYS_ID, int(new_mode), 0)
@@ -291,7 +312,7 @@ def setState(new_state):
     elif curr_state == MainState.State_waiting_lpos:
          if new_state == MainState.State_waiting_offboard:
               #copter_change_mode(COPTER_MODE_GUIDED)
-              copter_change_mode(mavutil.mavlink.MAV_MODE_GUIDED_ARMED)
+              copter_change_mode(mavutil.mavlink.MAV_MODE_GUIDED_DISARMED)
          #print("+++++++++++++++++++++++++++++++++++++++OFFBOARD REQUEST!!!!!!!!!!!!!!1")
          ### do something
     elif curr_state == MainState.State_waiting_offboard:
@@ -337,6 +358,8 @@ def waiting_offboard():
     process_mavlink()
     ### process video
     process_camera()
+    ### request offboard
+    copter_change_mode(mavutil.mavlink.MAV_MODE_GUIDED_DISARMED)
     ### Reset mode if no mark visible
     if  delta_millis(lpos_received_time) > LPOS_OBSERVATION_MILLIS:
          setState(MainState.State_waiting_lpos)
@@ -366,7 +389,6 @@ def do_landing():
     process_mavlink()
     ### process video
     process_camera()
-
 
 ### Get the camera calibration path
 camera_matrix = np.loadtxt(calib_path + calibration_file, delimiter=',')
@@ -427,7 +449,7 @@ copter_change_mode(mavutil.mavlink.MAV_MODE_MANUAL_ARMED)
 ### Alert of start
 if opts.showmessages:
     print "Starting main loop"
-### Get time of start
+###
 start_time = datetime.now()
 
 ### Fill previous camera attitude by zeros
@@ -435,6 +457,13 @@ prev_attitude = attitude
 
 ### Main loop
 while True:
+    ### Print timestamp
+    delta_time= delta_millis(start_time)    
+    if opts.showmessages:
+         print ("T delta=%d  Mode=%s" % (delta_time, curr_state))
+    ###
+    start_time = datetime.now()
+
     if curr_state == MainState.State_waiting_mark:
          waiting_mark()
     elif curr_state == MainState.State_waiting_lpos:
