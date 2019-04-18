@@ -11,6 +11,7 @@ def handle_heartbeat(msg):
 	mode = mavutil.mode_string_v10(msg)
 	is_armed = msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED
 	is_enabled = msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_GUIDED_ENABLED
+        print("MAV mode=",mode)
 
 def handle_rc_raw(msg):
 	channels = (msg.chan1_raw, msg.chan2_raw, msg.chan3_raw, msg.chan4_raw, 
