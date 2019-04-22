@@ -209,7 +209,7 @@ def process_mavlink():
               have_data = False  
 
 def process_camera():
-    global cap, master, first_loop, opts, yaw_copter, marker_visible, app_should_stop, curr_time, pos_camera_cm, observation_start
+    global cap, master, first_loop, opts, yaw_copter, marker_visible, app_should_stop, curr_time, pos_camera_cm
     ### Reset visibility flag
     marker_visible = False
 
