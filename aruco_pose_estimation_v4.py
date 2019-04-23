@@ -64,7 +64,22 @@ landing_target = Target(-1.6,0,5,0)
 MIN_OBSERVATION_PERIOD = 200   #millis
 LPOS_OBSERVATION_MILLIS = 8000 #millis
 COPTER_SYS_ID = 1
-LPOS_TYPE_MASK = 8 + 16 + 32 + 64 + 128 + 256 + 2048 #Ignore velocities, accelertion and yaw rate
+
+#define position targew for offbord mode - for first time use it only for Y-axis
+LPOS_TYPE_MASK = 1 + 4 + 8 + 16 + 32 + 64 + 128 + 256 + 1024 + 2048 #Ignore velocities, accelertion and yaw rate
+#Value	Field Name	Description
+#1	POSITION_TARGET_TYPEMASK_X_IGNORE	Ignore position x
+#2	POSITION_TARGET_TYPEMASK_Y_IGNORE	Ignore position y
+#4	POSITION_TARGET_TYPEMASK_Z_IGNORE	Ignore position z
+#8	POSITION_TARGET_TYPEMASK_VX_IGNORE	Ignore velocity x
+#16	POSITION_TARGET_TYPEMASK_VY_IGNORE	Ignore velocity y
+#32	POSITION_TARGET_TYPEMASK_VZ_IGNORE	Ignore velocity z
+#64	POSITION_TARGET_TYPEMASK_AX_IGNORE	Ignore acceleration x
+#128	POSITION_TARGET_TYPEMASK_AY_IGNORE	Ignore acceleration y
+#256	POSITION_TARGET_TYPEMASK_AZ_IGNORE	Ignore acceleration z
+#512	POSITION_TARGET_TYPEMASK_FORCE_SET	Use force instead of acceleration
+#1024	POSITION_TARGET_TYPEMASK_YAW_IGNORE	Ignore yaw
+#2048	POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE	Ignore yaw rate
 
 ### Setup state variables
 curr_state = prev_state = State_waiting_px
@@ -352,8 +367,9 @@ def setState(new_state):
          if opts.showmessages:
               print("Call of setState p1")
     elif curr_state == State_waiting_lpos:
-         if new_state == State_waiting_offboard:
-              copter_change_mode(mavutil.mavlink.MAV_MODE_GUIDED_DISARMED)
+         abcd = 325
+         #if new_state == State_waiting_offboard:
+         #     copter_change_mode(mavutil.mavlink.MAV_MODE_GUIDED_DISARMED)
          ### do something
     elif curr_state == State_waiting_offboard:
          ### do something
@@ -408,7 +424,7 @@ def waiting_offboard():
          copter_change_mode(mavutil.mavlink.MAV_MODE_MANUAL_ARMED)  
 
     ### process setpoint calculation
-    if copter_mode == "POSCTL":
+    if copter_mode == "OFFBOARD":
          setState(State_correcting)
 		 
 def do_correcting():
