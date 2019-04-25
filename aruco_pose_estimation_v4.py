@@ -1,3 +1,14 @@
+#   Manual offboard with Aruco marker
+#   Steps:
+#         1. Wait for PX4 hearbeat
+#         2. Look for mark
+#         3. When mark visible - start to send Vision_position_estimate
+#         4. When LPOS is received from PX4 - start to send offboard correction
+#
+#       process_mavlink() -processing incoming messages
+#       process_camera() - process images from camera and send Vision_poistion_estimate message
+#       do_correction() - send LPOS correction to PX4
+
 import numpy as np
 import cv2
 import cv2.aruco as aruco
@@ -7,7 +18,6 @@ from optparse import OptionParser
 from pymavlink import mavutil
 from datetime import datetime
 from datetime import timedelta
-from enum import Enum
 
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../mavlink'))
 
@@ -22,11 +32,9 @@ class Target(object):
 State_waiting_px       = 1
 State_waiting_mark     = 2
 State_waiting_lpos     = 3
-State_waiting_offboard = 4
 State_correcting       = 5 
-State_landing          = 6
 
-### Define Tag
+### Defines and params
 id_to_find = 77
 dictionnary_to_use = aruco.DICT_4X4_100
 marker_size  = 20 ### [cm]
@@ -38,14 +46,12 @@ camera_frame_heigh = 480
 yaw_mark = 0 ### inital value greater then possible 5 , changed to 0 to debug
 yaw_mark_detected = False 
 observation_start = 0
+small_correcting = False # if False - send final target
 
 ### Variables
-start_time = datetime.now()
 start_boot = datetime.now()
 first_loop = True
 yaw_camera = 0
-altitude_amsl = 0
-altitude_amsl_updated = False
 marker_visible = False
 lpos_received_time = 0
 app_should_stop = False
@@ -57,29 +63,16 @@ z_precision = 0.25
 yaw_precision = 0.2
 
 ### define landing target
-prelanding_target = Target(-1.6,0,0,0)
-landing_target = Target(-1.6,0,5,0)
+prelanding_target = Target(-1.5,0.1,0.1,0.01)
 
 ###CONSTATNS
 MIN_OBSERVATION_PERIOD = 200   #millis
 LPOS_OBSERVATION_MILLIS = 8000 #millis
 COPTER_SYS_ID = 1
+MAX_OBSERVATION_LOST_MILLIS = 200
 
 #define position targew for offbord mode - for first time use it only for Y-axis
-LPOS_TYPE_MASK = 1 + 4 + 8 + 16 + 32 + 64 + 128 + 256 + 1024 + 2048 #Ignore velocities, accelertion and yaw rate
-#Value	Field Name	Description
-#1	POSITION_TARGET_TYPEMASK_X_IGNORE	Ignore position x
-#2	POSITION_TARGET_TYPEMASK_Y_IGNORE	Ignore position y
-#4	POSITION_TARGET_TYPEMASK_Z_IGNORE	Ignore position z
-#8	POSITION_TARGET_TYPEMASK_VX_IGNORE	Ignore velocity x
-#16	POSITION_TARGET_TYPEMASK_VY_IGNORE	Ignore velocity y
-#32	POSITION_TARGET_TYPEMASK_VZ_IGNORE	Ignore velocity z
-#64	POSITION_TARGET_TYPEMASK_AX_IGNORE	Ignore acceleration x
-#128	POSITION_TARGET_TYPEMASK_AY_IGNORE	Ignore acceleration y
-#256	POSITION_TARGET_TYPEMASK_AZ_IGNORE	Ignore acceleration z
-#512	POSITION_TARGET_TYPEMASK_FORCE_SET	Use force instead of acceleration
-#1024	POSITION_TARGET_TYPEMASK_YAW_IGNORE	Ignore yaw
-#2048	POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE	Ignore yaw rate
+LPOS_TYPE_MASK = 0x4 and 0x38 and 0x1C0 and 0x400 and 0x800 and 0x3000
 
 ### Setup state variables
 curr_state = prev_state = State_waiting_px
@@ -154,13 +147,11 @@ def handle_attitude(msg):
 
          attitude_mav = (msg.roll, msg.pitch, msg.yaw, msg.rollspeed, 
 				msg.pitchspeed, msg.yawspeed)
-         if opts.showmessages:
-               print ("YAW=%f" % msg.yaw)
          ### Show reseived information
- #        if opts.showmessages:
- #             print ("MSG type= ATTITUDE")
- #	      #print "Roll\tPit\tYaw\tRSpd\tPSpd\tYSpd"
- #	      #print "%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t" % attitude_mav
+         if opts.showmessages:
+              print ("MSG type= ATTITUDE")
+              print "Roll\tPit\tYaw\tRSpd\tPSpd\tYSpd"
+              print "%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t" % attitude_mav
  #         ### if first loop - clculate yaw for mark
  #        if yaw_mark_detected and yaw_mark == 5:
  #             yaw_mark = attitude_mav[2] - yaw_cam
@@ -169,36 +160,37 @@ def handle_attitude(msg):
  #                  print ("Copter yaw        = %4.2f" % attitude_mav[2])
  #                  print ("Cam yaw           = %4.2f" % yaw_cam)              
  #                  print ("Mark yaw detected = %4.2f" % yaw_mark)
+
 def handle_hud(msg):
          global altitude_amsl, altitude_amsl_updated
-
          hud_data = (msg.airspeed, msg.groundspeed, msg.heading, 
 				msg.throttle, msg.alt, msg.climb)
-         
-         #if opts.showmessages:
-         #     print ("MSG type= VFR_HUD")
-         #     #print "Aspd\tGspd\tHead\tThro\tAlt\tClimb"
-         #     #print "%0.2f\t%0.2f\t%0.2f\t%0.2f\t%0.2f\t%0.2f" % hud_data
+         if opts.showmessages:
+              print ("MSG type= VFR_HUD")
+              print "Aspd\tGspd\tHead\tThro\tAlt\tClimb"
+              print "%0.2f\t%0.2f\t%0.2f\t%0.2f\t%0.2f\t%0.2f" % hud_data
 		
 def handle_heartbeat(msg):
-	global copter_mode
+	global copter_mode, is_armed
         copter_mode = mavutil.mode_string_v10(msg)
-	#is_armed = msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED
+	is_armed = msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED
 	#is_enabled = msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_GUIDED_ENABLED
-        #print(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>MAV mode=",copter_mode)
+        if opts.showmessages:
+              print("MAV mode=%s, Armed=%d" % (copter_mode, is_armed))
 	  
 def handle_lpos(msg):
          global altitude_amsl, altitude_amsl_updated, lpos_received_time, lpos_data
          lpos_data = (msg.x, msg.y, msg.z, msg.vx, msg.vy, msg.vz)
+         # We check if is position LPOS or only Altitude 
          if msg.x<>0 and msg.y<>0:
               lpos_received_time = datetime.now() 
-#              if opts.showmessages:
-#                   print ("MSG type= LPOS")
-#                   print "X\tY\tZ\tVx\tVy\tVz"
-#                   print "%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f" % lpos_data
-#         else:
-#              if opts.showmessages:
-#                   print ("LPOS - NO POSITION!")
+              if opts.showmessages:
+                   print ("MSG type= LPOS")
+                   print "X\tY\tZ\tVx\tVy\tVz"
+                   print "%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f" % lpos_data
+         else:
+              if opts.showmessages:
+                   print ("LPOS - NO POSITION!")
 
 def process_mavlink():
     global master, msg, msg_type
@@ -225,15 +217,11 @@ def process_mavlink():
          else:
               have_data = False  
 
-def copter_change_mode(new_mode):
-    master.mav.set_mode_send(COPTER_SYS_ID, int(new_mode), 0)
-
-def copter_request_landing():
-    abcd=325
-    #master.mav.command_long_send(COPTER_SYS_ID, 0, mavutil.mavlink.MAV_CMD_NAV_LAND_LOCAL, 0, 2, 1, landing_target.yaw, landing_target.y, landing_target.x, landing_target.z, 0)    
+def copter_change_mode(new_base_mode, new_custom_mode = 0):
+    master.mav.set_mode_send(COPTER_SYS_ID, int(new_base_mode), int(new_custom_mode))
 
 def process_camera():
-    global cap, master, first_loop, opts, yaw_copter, marker_visible, app_should_stop, start_time, pos_camera_cm, observation_start
+    global cap, master, first_loop, opts, yaw_copter, marker_visible, app_should_stop, start_time, pos_camera_cm, observation_start, observation_lost
     ### Reset visibility flag
     marker_visible = False
 
@@ -252,8 +240,9 @@ def process_camera():
          ### alow to calculate real mark yaw
          yaw_mark_detected = True
 	 marker_visible = True
-	 if observation_start == 0:
+         if observation_start == 0:
               observation_start = datetime.now()
+         observation_lost = datetime.now()
          ### Parse markers
          ret = aruco.estimatePoseSingleMarkers(corners, marker_size, camera_matrix, camera_distortion)	
          ### Unpack the output, get only the first
@@ -282,15 +271,14 @@ def process_camera():
                    ### Send data to FC position is NED
 		   master.mav.vision_position_estimate_send(delta_time, p_x_cm * 0.01, p_y_cm * 0.01, p_z_m, roll_cam, pitch_cam, yaw_copter)
                    if opts.showmessages:
-                        print ("Mark X=%4.2f Y=%4.2f Z=%4.2f" % (pos_camera_cm[2], pos_camera_cm[0], pos_camera_cm[1]))
-                        #print ("Alt=%4.2f Z=%4.2f" % (altitude_amsl, 0.01 * pos_camera_cm[1]))
-                        #print("Mark X=%4.2f Y=%4.2f Z=%4.2f Sent X=%4.2f Y=%4.2f Z=%4.2f Yaw_mark=%4.2f Yaw_mav=%4.2F Yaw_copter=%4.2f" % (pos_camera_cm[0], pos_camera_cm[2], pos_camera_cm[1], p_x_cm, p_y_cm, p_z_m, yaw_mark, attitude_mav[2], yaw_copter))
+                        print("Mark X=%4.2f Y=%4.2f Z=%4.2f Sent X=%4.2f Y=%4.2f Z=%4.2f Yaw_mark=%4.2f Yaw_mav=%4.2F Yaw_copter=%4.2f" % (pos_camera_cm[0], pos_camera_cm[2], pos_camera_cm[1], p_x_cm, p_y_cm, p_z_m, yaw_mark, attitude_mav[2], yaw_copter))
          else:
               first_loop = False
 
     ### Reset observation start if mark not found
     if not marker_visible:
          observation_start = 0
+         observation_lost = datetime.now()
 		 
     ### Display the frame
     if opts.showvideo:	
@@ -305,8 +293,8 @@ def process_camera():
 def correct_lpos():
     global lpos_data, attitude_mav
 
-    #if opts.showmessages:
-    #     print("Correcting LPOS")
+    if opts.showmessages:
+         print("Correcting LPOS")
     
     ### Calculate deltas
     delta_x = prelanding_target.x - lpos_data[0]
@@ -314,26 +302,29 @@ def correct_lpos():
     delta_z = prelanding_target.z - lpos_data[2]
     delta_yaw = prelanding_target.yaw - attitude_mav[2]
 
-    ###Calculate corrected position
-    if delta_x > x_precision:
-         new_x_m = lpos_data[0] + delta_x * 0.1
+    ###Calculate corrected position if flag small correction is checked-  we approach to target slowly
+    if small_correcting:
+         if delta_x > x_precision:
+              new_x_m = lpos_data[0] + delta_x * 0.1
+         else:
+              new_x_m = lpos_data[0] + delta_x
+         if delta_y > y_precision:
+              new_y_m = lpos_data[1] + delta_y * 0.1
+         else:
+              new_y_m = lpos_data[1] + delta_y
+         if delta_z > z_precision:
+              new_z_m = lpos_data[2] + delta_z * 0.1
+         else:
+              new_z_m = lpos_data[2] + delta_z
+         if delta_yaw > yaw_precision:
+              new_yaw = attitude_mav[2] + delta_yaw * 0.1
+         else:
+              new_yaw = attitude_mav[2] + delta_yaw
     else:
          new_x_m = lpos_data[0] + delta_x
-
-    if delta_y > y_precision:
-         new_y_m = lpos_data[1] + delta_y * 0.1
-    else:
          new_y_m = lpos_data[1] + delta_y
-
-    if delta_z > z_precision:
-         new_z_m = lpos_data[2] + delta_z * 0.1
-    else:
          new_z_m = lpos_data[2] + delta_z
-
-    if delta_z > yaw_precision:
-         new_z_m = attitude_mav[2] + delta_yaw * 0.1
-    else:
-         new_z_m = attitude_mav[2] + delta_yaw
+         new_yaw = attitude_mav[2] + delta_yaw
 
     ### Prepare message components
     nm_time_boot_ms = delta_millis(start_boot)
@@ -344,6 +335,8 @@ def correct_lpos():
     nm_y = new_y_m
     nm_z = new_z_m
     nm_yaw = new_yaw
+    if opts.showmessages:
+         print("Target =X=%4.2f Y=%4.2f Z=%4.2f Yaw=%4.2f" % (nm_x, nm_y, nm_z, nm_yaw) )
 
     ### Send message with following full format
     #master.mav.set_position_target_local_ned_send(nm_time_boot_ms, nm_sys_id, nm_sys_comp, nm_coordinate_frame, nm_type_mask, nm_x, nm_y, nm_z, nm_vx, nm_vy, nm_vz, nm_afx, nm_afy, nm_afz, nm_yaw, nm_yawrate)
@@ -367,24 +360,15 @@ def setState(new_state):
          if opts.showmessages:
               print("Call of setState p1")
     elif curr_state == State_waiting_lpos:
-         abcd = 325
          #if new_state == State_waiting_offboard:
          #     copter_change_mode(mavutil.mavlink.MAV_MODE_GUIDED_DISARMED)
          ### do something
-    elif curr_state == State_waiting_offboard:
-         ### do something
          if opts.showmessages:
-              print("Call of setState p2")
+              print("Call of setState waiting LPOS")
     elif curr_state == State_correcting:
          ### do something
          if opts.showmessages:
-              print("Call of setState p3")
-         if new_state == State_landing:
-              copter_request_landing()
-    elif curr_state == State_landing:
-         ### do something
-	 ### update states variables
-	 prev_state = curr_state
+              print("Call of setState correcting")
     #Set state for next iterratoins
     curr_state = new_state
     print("State changed, NEW STATE=", curr_state)
@@ -408,48 +392,23 @@ def waiting_lpos():
     ### Check for switch to next state
     if lpos_received_time:
          if  delta_millis(lpos_received_time) < LPOS_OBSERVATION_MILLIS:
-    	      setState(State_waiting_offboard)
-
-def waiting_offboard():
-    global curr_state, cap, master, first_loop, opts, yaw_copter, msg, msg_type, marker_visible, copter_mode
-    ### process communication with PX4
-    process_mavlink()
-    ### process video
-    process_camera()
-    ### request offboard
-    copter_change_mode(mavutil.mavlink.MAV_MODE_GUIDED_DISARMED)
-    ### Reset mode if no mark visible
-    if  delta_millis(lpos_received_time) > LPOS_OBSERVATION_MILLIS:
-         setState(State_waiting_lpos)
-         copter_change_mode(mavutil.mavlink.MAV_MODE_MANUAL_ARMED)  
-
-    ### process setpoint calculation
-    if copter_mode == "OFFBOARD":
-         setState(State_correcting)
+    	      setState(State_correcting)
 		 
 def do_correcting():
-    global curr_state, cap, master, first_loop, opts, yaw_copter, msg, msg_type, marker_visible, lpos, attitude_mav, landing_target
+    global curr_state, cap, master, first_loop, opts, yaw_copter, msg, msg_type, marker_visible, lpos, attitude_mav, landing_target, observation_lost
     ### process communication with PX4
     process_mavlink()
     ### process video
     process_camera()
     ### calc correction
     correct_lpos()
-    ### check fo landing position
-    check_for_landing()
     ### Reset mode if no mark
     if  delta_millis(lpos_received_time) > LPOS_OBSERVATION_MILLIS:
          setState(State_waiting_lpos)
-         copter_change_mode(mavutil.mavlink.MAV_MODE_MANUAL_ARMED)  
-
-def do_landing():
-    global curr_state, cap, master, first_loop, opts, yaw_copter, msg, msg_type, marker_visible
-    ### process communication with PX4
-    process_mavlink()
-    ### process video
-    process_camera()
-    ### calc correction
-    correct_lpos()
+         copter_change_mode(mavutil.mavlink.MAV_MODE_MANUAL_ARMED, 0)  
+    ### If observation is stable - switch to next state
+    if delta_millis(observation_lost) > MAX_OBSERVATION_LOST_MILLIS :
+         setState(State_waiting_lpos)
 
 ### Get the camera calibration path
 camera_matrix = np.loadtxt(calib_path + calibration_file, delimiter=',')
@@ -466,7 +425,7 @@ cap.set(cv2.CAP_PROP_FRAME_WIDTH, camera_frame_width)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, camera_frame_heigh)
 
 ### Font for the text in the image
-font = cv2.FONT_HERSHEY_PLAIN
+#font = cv2.FONT_HERSHEY_PLAIN
 
 ### read command line options
 parser = OptionParser("readdata.py [options]")
@@ -498,9 +457,6 @@ master.wait_heartbeat()
 # Switch to next state
 setState(State_waiting_mark)
 
-#Stich copter to manual mode
-copter_change_mode(mavutil.mavlink.MAV_MODE_MANUAL_ARMED)
-
 ### Alert of start
 if opts.showmessages:
     print "Starting main loop"
@@ -523,12 +479,8 @@ while True:
          waiting_mark()
     elif curr_state == State_waiting_lpos:
 	 waiting_lpos()
-    elif curr_state == State_waiting_offboard:
-	 waiting_offboard()
     elif curr_state == State_correcting:
 	 do_correcting()
-    elif curr_state == State_landing:
-	 do_landing()
     ##Check for exit from application flag
     if app_should_stop == True:
          break
