@@ -61,9 +61,10 @@ x_precision = 0.1
 y_precision = 0.1
 z_precision = 0.25
 yaw_precision = 0.2
+alpha = 0.01
 
 ### define landing target
-prelanding_target = Target(-1.5,0.1,-0.1,0.01)
+prelanding_target = Target(-1.6,0.1,-0.1,0.01)
 
 ###CONSTATNS
 MIN_OBSERVATION_PERIOD = 200   #millis
@@ -221,7 +222,7 @@ def copter_change_mode(new_base_mode, new_custom_mode = 0):
     master.mav.set_mode_send(COPTER_SYS_ID, int(new_base_mode), int(new_custom_mode))
 
 def process_camera():
-    global cap, master, first_loop, opts, yaw_copter, marker_visible, app_should_stop, start_time, pos_camera_cm, observation_start, observation_lost
+    global cap, master, first_loop, opts, yaw_copter, marker_visible, app_should_stop, start_time, pos_camera_cm, observation_start, observation_lost, lpos_x, lpos_y
     ### Reset visibility flag
     marker_visible = False
 
@@ -268,6 +269,8 @@ def process_camera():
 		   ### Convert to NED and meters and include copter baro alt
 		   p_x_cm, p_y_cm = uav_to_ne(pos_camera_cm[2], pos_camera_cm[0], yaw_copter)
                    p_z_m = -0.01 * pos_camera_cm[1]
+                   lpos_x = p_x_cm * 0.01
+                   lpos_y = p_y_cm * 0.01
                    ### Send data to FC position is NED
 		   master.mav.vision_position_estimate_send(delta_time, p_x_cm * 0.01, p_y_cm * 0.01, p_z_m, roll_cam, pitch_cam, yaw_copter)
                    if opts.showmessages and False:
@@ -291,40 +294,12 @@ def process_camera():
               app_should_stop = True
 
 def correct_lpos():
-    global lpos_data, attitude_mav
 
     if opts.showmessages:
          print("Correcting LPOS")
-    
-    ### Calculate deltas
-    delta_x = prelanding_target.x - lpos_data[0]
-    delta_y = prelanding_target.y - lpos_data[1]
-    delta_z = prelanding_target.z - lpos_data[2]
-    delta_yaw = prelanding_target.yaw - attitude_mav[2]
-
-    ###Calculate corrected position if flag small correction is checked-  we approach to target slowly
-    if small_correcting:
-         if delta_x > x_precision:
-              new_x_m = lpos_data[0] + delta_x * 0.1
-         else:
-              new_x_m = lpos_data[0] + delta_x
-         if delta_y > y_precision:
-              new_y_m = lpos_data[1] + delta_y * 0.1
-         else:
-              new_y_m = lpos_data[1] + delta_y
-         if delta_z > z_precision:
-              new_z_m = lpos_data[2] + delta_z * 0.1
-         else:
-              new_z_m = lpos_data[2] + delta_z
-         if delta_yaw > yaw_precision:
-              new_yaw = attitude_mav[2] + delta_yaw * 0.1
-         else:
-              new_yaw = attitude_mav[2] + delta_yaw
-    else:
-         new_x_m = lpos_data[0] + delta_x
-         new_y_m = lpos_data[1] + delta_y
-         new_z_m = lpos_data[2] + delta_z
-         new_yaw = attitude_mav[2] + delta_yaw
+    new_x_m = prelanding_target.x
+    new_y_m = prelanding_target.y
+    new_z_m = prelanding_target.z
 
     ### Prepare message components
     nm_time_boot_ms = delta_millis(start_boot)
@@ -334,27 +309,21 @@ def correct_lpos():
     nm_x = new_x_m
     nm_y = new_y_m
     nm_z = new_z_m
-    #nm_yaw = new_yaw
-    nm_yaw = -1 * math.atan2(lpos_data[1], abs(lpos_data[0]))
+        
+    try:
+         prew_yaw
+    except NameError:
+         prev_yaw = cp_yaw = -1 * math.atan2(lpos_y, abs(lpos_x))
 
+    prev_yaw = cp_yaw
+    cp_yaw = -1 * math.atan2(lpos_y, abs(lpos_x))
+    nm_yaw = (1-alpha) * prev_yaw + alpha * cp_yaw
     if opts.showmessages:
-         print("Target =X=%4.2f Y=%4.2f Z=%4.2f Yaw=%4.2f" % (nm_x, nm_y, nm_z, nm_yaw) )
-
+         print("Target =X=%4.2f Y=%4.2f Z=%4.2f Yaw=%4.4f" % (nm_x, nm_y, nm_z, nm_yaw) )
     ### Send message with following full format
     #master.mav.set_position_target_local_ned_send(nm_time_boot_ms, nm_sys_id, nm_sys_comp, nm_coordinate_frame, nm_type_mask, nm_x, nm_y, nm_z, nm_vx, nm_vy, nm_vz, nm_afx, nm_afy, nm_afz, nm_yaw, nm_yawrate)
     master.mav.set_position_target_local_ned_send(nm_time_boot_ms, nm_sys_id, 0, nm_coordinate_frame, nm_type_mask, nm_x, nm_y, nm_z, 0, 0, 0, 0, 0, 0, nm_yaw, 0)
 
-def check_for_landing():
-     global lpos_data, attitude_mav, landing_target
-     x_ok = abs(prelanding_target.x - lpos_data[0]) < x_precision
-     y_ok = abs(prelanding_target.y - lpos_data[1]) < y_precision
-     z_ok = abs(prelanding_target.z - lpos_data[2]) < z_precision
-     yaw_ok = abs(prelanding_target.yaw - attitude_mav[2]) < yaw_precision
-     if ( x_ok and y_ok and z_ok and yaw_ok ):
-         if opts.showmessages:
-              print ("OK for landing")
-         setState(State_landing)
-	
 def setState(new_state):
     global curr_state, prev_state
     if curr_state == State_waiting_mark:
@@ -376,14 +345,14 @@ def setState(new_state):
     print("State changed, NEW STATE=", curr_state)
 
 def waiting_mark():
-    global curr_state, cap, master, first_loop, opts, yaw_copter, msg, msg_type, marker_visible
+    global curr_state, cap, master, first_loop, opts, yaw_copter, msg, msg_type, marker_visible, lpos_x, lpos_y
     ### process communication with PX4
     process_mavlink()
     ### process video
     process_camera()
     ### If observation is stable - switch to next state
     if marker_visible and delta_millis(observation_start) > MIN_OBSERVATION_PERIOD :
-         setState(State_waiting_lpos)
+         setState(State_correcting)
 	
 def waiting_lpos():
     global curr_state, cap, master, first_loop, opts, yaw_copter, msg, msg_type, marker_visible
@@ -397,7 +366,7 @@ def waiting_lpos():
     	      setState(State_correcting)
 		 
 def do_correcting():
-    global curr_state, cap, master, first_loop, opts, yaw_copter, msg, msg_type, marker_visible, lpos, attitude_mav, landing_target, observation_lost
+    global curr_state, cap, master, first_loop, opts, yaw_copter, msg, msg_type, marker_visible, lpos, attitude_mav, landing_target, observation_lost, lpos_x, lpos_y
     ### process communication with PX4
     process_mavlink()
     ### process video
@@ -405,22 +374,12 @@ def do_correcting():
     ### calc correction
     correct_lpos()
     ### Reset mode if no mark
-    if  delta_millis(lpos_received_time) > LPOS_OBSERVATION_MILLIS:
-         setState(State_waiting_lpos)
-         copter_change_mode(mavutil.mavlink.MAV_MODE_MANUAL_ARMED, 0)  
+    #if  delta_millis(lpos_received_time) > LPOS_OBSERVATION_MILLIS:
+    #     setState(State_waiting_lpos)
+    #     copter_change_mode(mavutil.mavlink.MAV_MODE_MANUAL_ARMED, 0)  
     ### If observation is stable - switch to next state
     if delta_millis(observation_lost) > MAX_OBSERVATION_LOST_MILLIS :
          setState(State_waiting_lpos)
-
-
-#x_cc = -1.37
-#y_cc = 0.44
-#new_yaw = -1 * math.atan2(y_cc, abs(x_cc))
-#print("Yaw = %f" % new_yaw)
-#while True:
-#    abc = 324
-
-
 
 ### Get the camera calibration path
 camera_matrix = np.loadtxt(calib_path + calibration_file, delimiter=',')
