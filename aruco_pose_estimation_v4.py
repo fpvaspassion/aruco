@@ -33,6 +33,7 @@ State_waiting_px       = 1
 State_waiting_mark     = 2
 State_waiting_lpos     = 3
 State_correcting       = 5 
+State_landing          = 6 
 
 ### Defines and params
 id_to_find = 77
@@ -294,7 +295,7 @@ def process_camera():
               app_should_stop = True
 
 def correct_lpos():
-
+    global prev_yaw
     if opts.showmessages:
          print("Correcting LPOS")
     new_x_m = prelanding_target.x
@@ -324,8 +325,18 @@ def correct_lpos():
     #master.mav.set_position_target_local_ned_send(nm_time_boot_ms, nm_sys_id, nm_sys_comp, nm_coordinate_frame, nm_type_mask, nm_x, nm_y, nm_z, nm_vx, nm_vy, nm_vz, nm_afx, nm_afy, nm_afz, nm_yaw, nm_yawrate)
     master.mav.set_position_target_local_ned_send(nm_time_boot_ms, nm_sys_id, 0, nm_coordinate_frame, nm_type_mask, nm_x, nm_y, nm_z, 0, 0, 0, 0, 0, 0, nm_yaw, 0)
 
+def check_for_landing():
+     global lpos_data, attitude_mav, landing_target
+     x_ok = abs(prelanding_target.x - lpos_x) < x_precision
+     y_ok = abs(prelanding_target.y - lpos_y) < y_precision
+     yaw_ok = abs(prelanding_target.yaw - prev_yaw) < yaw_precision
+     if ( x_ok and y_ok and yaw_ok ):
+         if opts.showmessages:
+              print ("OK for landing")
+         setState(State_landing)
+	
 def setState(new_state):
-    global curr_state, prev_state
+    global curr_state, prev_state, prelanding_target
     if curr_state == State_waiting_mark:
          ### do something		 
          if opts.showmessages:
@@ -337,6 +348,9 @@ def setState(new_state):
          if opts.showmessages:
               print("Call of setState waiting LPOS")
     elif curr_state == State_correcting:
+         if new_state == State_landing:
+              #     copter_change_mode(mavutil.mavlink.MAV_MODE_GUIDED_DISARMED)
+              prelanding_target.z = 20
          ### do something
          if opts.showmessages:
               print("Call of setState correcting")
@@ -380,6 +394,27 @@ def do_correcting():
     ### If observation is stable - switch to next state
     if delta_millis(observation_lost) > MAX_OBSERVATION_LOST_MILLIS :
          setState(State_waiting_lpos)
+    ### Check for landing position
+    check_for_landing()
+
+def do_landing():
+    global curr_state, cap, master, first_loop, opts, yaw_copter, msg, msg_type, marker_visible, lpos, attitude_mav, landing_target, observation_lost, lpos_x, lpos_y
+    ### process communication with PX4
+    process_mavlink()
+    ### process video
+    process_camera()
+    ### calc correction
+    correct_lpos()
+    ### Reset mode if no mark
+    #if  delta_millis(lpos_received_time) > LPOS_OBSERVATION_MILLIS:
+    #     setState(State_waiting_lpos)
+    #     copter_change_mode(mavutil.mavlink.MAV_MODE_MANUAL_ARMED, 0)  
+    ### If observation is stable - switch to next state
+    if delta_millis(observation_lost) > MAX_OBSERVATION_LOST_MILLIS :
+         setState(State_waiting_lpos)
+    ### Check for landing position
+    check_for_landing()
+
 
 ### Get the camera calibration path
 camera_matrix = np.loadtxt(calib_path + calibration_file, delimiter=',')
@@ -452,6 +487,8 @@ while True:
 	 waiting_lpos()
     elif curr_state == State_correcting:
 	 do_correcting()
+    elif curr_state == State_landing:
+	 do_landing()
     ##Check for exit from application flag
     if app_should_stop == True:
          break
