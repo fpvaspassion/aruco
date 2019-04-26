@@ -63,7 +63,7 @@ z_precision = 0.25
 yaw_precision = 0.2
 
 ### define landing target
-prelanding_target = Target(-1.5,0.1,0.1,0.01)
+prelanding_target = Target(-1.5,0.1,-0.1,0.01)
 
 ###CONSTATNS
 MIN_OBSERVATION_PERIOD = 200   #millis
@@ -148,7 +148,7 @@ def handle_attitude(msg):
          attitude_mav = (msg.roll, msg.pitch, msg.yaw, msg.rollspeed, 
 				msg.pitchspeed, msg.yawspeed)
          ### Show reseived information
-         if opts.showmessages:
+         if opts.showmessages and False:
               print ("MSG type= ATTITUDE")
               print "Roll\tPit\tYaw\tRSpd\tPSpd\tYSpd"
               print "%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t" % attitude_mav
@@ -165,7 +165,7 @@ def handle_hud(msg):
          global altitude_amsl, altitude_amsl_updated
          hud_data = (msg.airspeed, msg.groundspeed, msg.heading, 
 				msg.throttle, msg.alt, msg.climb)
-         if opts.showmessages:
+         if opts.showmessages and False:
               print ("MSG type= VFR_HUD")
               print "Aspd\tGspd\tHead\tThro\tAlt\tClimb"
               print "%0.2f\t%0.2f\t%0.2f\t%0.2f\t%0.2f\t%0.2f" % hud_data
@@ -184,7 +184,7 @@ def handle_lpos(msg):
          # We check if is position LPOS or only Altitude 
          if msg.x<>0 and msg.y<>0:
               lpos_received_time = datetime.now() 
-              if opts.showmessages:
+              if opts.showmessages and False:
                    print ("MSG type= LPOS")
                    print "X\tY\tZ\tVx\tVy\tVz"
                    print "%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f" % lpos_data
@@ -270,7 +270,7 @@ def process_camera():
                    p_z_m = -0.01 * pos_camera_cm[1]
                    ### Send data to FC position is NED
 		   master.mav.vision_position_estimate_send(delta_time, p_x_cm * 0.01, p_y_cm * 0.01, p_z_m, roll_cam, pitch_cam, yaw_copter)
-                   if opts.showmessages:
+                   if opts.showmessages and False:
                         print("Mark X=%4.2f Y=%4.2f Z=%4.2f Sent X=%4.2f Y=%4.2f Z=%4.2f Yaw_mark=%4.2f Yaw_mav=%4.2F Yaw_copter=%4.2f" % (pos_camera_cm[0], pos_camera_cm[2], pos_camera_cm[1], p_x_cm, p_y_cm, p_z_m, yaw_mark, attitude_mav[2], yaw_copter))
          else:
               first_loop = False
@@ -334,7 +334,9 @@ def correct_lpos():
     nm_x = new_x_m
     nm_y = new_y_m
     nm_z = new_z_m
-    nm_yaw = new_yaw
+    #nm_yaw = new_yaw
+    nm_yaw = -1 * math.atan2(lpos_data[1], abs(lpos_data[0]))
+
     if opts.showmessages:
          print("Target =X=%4.2f Y=%4.2f Z=%4.2f Yaw=%4.2f" % (nm_x, nm_y, nm_z, nm_yaw) )
 
@@ -409,6 +411,16 @@ def do_correcting():
     ### If observation is stable - switch to next state
     if delta_millis(observation_lost) > MAX_OBSERVATION_LOST_MILLIS :
          setState(State_waiting_lpos)
+
+
+#x_cc = -1.37
+#y_cc = 0.44
+#new_yaw = -1 * math.atan2(y_cc, abs(x_cc))
+#print("Yaw = %f" % new_yaw)
+#while True:
+#    abc = 324
+
+
 
 ### Get the camera calibration path
 camera_matrix = np.loadtxt(calib_path + calibration_file, delimiter=',')
