@@ -192,13 +192,13 @@ def handle_lpos(msg):
          lpos_data = (msg.x, msg.y, msg.z, msg.vx, msg.vy, msg.vz)
          if msg.x<>0 and msg.y<>0:
               lpos_received_time = datetime.now() 
-#              if opts.showmessages:
-#                   print ("MSG type= LPOS")
-#                   print "X\tY\tZ\tVx\tVy\tVz"
-#                   print "%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f" % lpos_data
-#         else:
-#              if opts.showmessages:
-#                   print ("LPOS - NO POSITION!")
+              if opts.showmessages:
+                   print ("MSG type= LPOS")
+                   print "X\tY\tZ\tVx\tVy\tVz"
+                   print "%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f" % lpos_data
+         else:
+              if opts.showmessages:
+                   print ("LPOS - NO POSITION!")
 
 def process_mavlink():
     global master, msg, msg_type
