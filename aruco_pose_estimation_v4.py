@@ -55,6 +55,7 @@ x_precision = 0.1
 y_precision = 0.1
 z_precision = 0.25
 yaw_precision = 0.2
+alpha = 0.01
 
 ### define landing target
 prelanding_target = Target(-1.6,0,0,0)
@@ -228,9 +229,13 @@ def process_mavlink():
 def copter_change_mode(new_mode):
     master.mav.set_mode_send(COPTER_SYS_ID, int(new_mode), 0)
 
+def copter_set_offboard():
+    VEHICLE_CMD_NAV_GUIDED_ENABLE
+    master.mav.command_long_send(COPTER_SYS_ID, 0, mavutil.mavlink.VEHICLE_CMD_NAV_GUIDED_ENABLE, 0, 2, 1, landing_target.yaw, landing_target.y, landing_target.x, landing_target.z, 0)    
+
 def copter_request_landing():
-    abcd=325
-    #master.mav.command_long_send(COPTER_SYS_ID, 0, mavutil.mavlink.MAV_CMD_NAV_LAND_LOCAL, 0, 2, 1, landing_target.yaw, landing_target.y, landing_target.x, landing_target.z, 0)    
+    #Request landing
+    master.mav.command_long_send(COPTER_SYS_ID, 0, mavutil.mavlink.MAV_CMD_NAV_LAND_LOCAL, 0, 2, 1, landing_target.yaw, landing_target.y, landing_target.x, landing_target.z, 0)    
 
 def process_camera():
     global cap, master, first_loop, opts, yaw_copter, marker_visible, app_should_stop, start_time, pos_camera_cm, observation_start
@@ -303,37 +308,11 @@ def process_camera():
               app_should_stop = True
 
 def correct_lpos():
-    global lpos_data, attitude_mav
-
-    #if opts.showmessages:
-    #     print("Correcting LPOS")
-    
-    ### Calculate deltas
-    delta_x = prelanding_target.x - lpos_data[0]
-    delta_y = prelanding_target.y - lpos_data[1]
-    delta_z = prelanding_target.z - lpos_data[2]
-    delta_yaw = prelanding_target.yaw - attitude_mav[2]
-
-    ###Calculate corrected position
-    if delta_x > x_precision:
-         new_x_m = lpos_data[0] + delta_x * 0.1
-    else:
-         new_x_m = lpos_data[0] + delta_x
-
-    if delta_y > y_precision:
-         new_y_m = lpos_data[1] + delta_y * 0.1
-    else:
-         new_y_m = lpos_data[1] + delta_y
-
-    if delta_z > z_precision:
-         new_z_m = lpos_data[2] + delta_z * 0.1
-    else:
-         new_z_m = lpos_data[2] + delta_z
-
-    if delta_z > yaw_precision:
-         new_z_m = attitude_mav[2] + delta_yaw * 0.1
-    else:
-         new_z_m = attitude_mav[2] + delta_yaw
+    if opts.showmessages:
+         print("Correcting LPOS")
+    new_x_m = prelanding_target.x
+    new_y_m = prelanding_target.y
+    new_z_m = prelanding_target.z
 
     ### Prepare message components
     nm_time_boot_ms = delta_millis(start_boot)
@@ -343,11 +322,21 @@ def correct_lpos():
     nm_x = new_x_m
     nm_y = new_y_m
     nm_z = new_z_m
-    nm_yaw = new_yaw
+        
+    try:
+         prew_yaw
+    except NameError:
+         prev_yaw = cp_yaw = -1 * math.atan2(lpos_data[1], abs(lpos_data[0]))
 
+    prev_yaw = cp_yaw
+    cp_yaw = -1 * math.atan2(lpos_data[1], abs(lpos_data[0]))
+    nm_yaw = (1-alpha) * prev_yaw + alpha * cp_yaw
+    if opts.showmessages:
+         print("Target =X=%4.2f Y=%4.2f Z=%4.2f Yaw=%4.4f" % (nm_x, nm_y, nm_z, nm_yaw) )
     ### Send message with following full format
     #master.mav.set_position_target_local_ned_send(nm_time_boot_ms, nm_sys_id, nm_sys_comp, nm_coordinate_frame, nm_type_mask, nm_x, nm_y, nm_z, nm_vx, nm_vy, nm_vz, nm_afx, nm_afy, nm_afz, nm_yaw, nm_yawrate)
     master.mav.set_position_target_local_ned_send(nm_time_boot_ms, nm_sys_id, 0, nm_coordinate_frame, nm_type_mask, nm_x, nm_y, nm_z, 0, 0, 0, 0, 0, 0, nm_yaw, 0)
+
 
 def check_for_landing():
      global lpos_data, attitude_mav, landing_target
@@ -367,24 +356,21 @@ def setState(new_state):
          if opts.showmessages:
               print("Call of setState p1")
     elif curr_state == State_waiting_lpos:
-         abcd = 325
-         #if new_state == State_waiting_offboard:
-         #     copter_change_mode(mavutil.mavlink.MAV_MODE_GUIDED_DISARMED)
-         ### do something
+         if new_state == State_waiting_offboard:
+              copter_change_mode(mavutil.mavlink.MAV_MODE_GUIDED_DISARMED)
     elif curr_state == State_waiting_offboard:
-         ### do something
          if opts.showmessages:
               print("Call of setState p2")
     elif curr_state == State_correcting:
-         ### do something
          if opts.showmessages:
               print("Call of setState p3")
          if new_state == State_landing:
               copter_request_landing()
     elif curr_state == State_landing:
-         ### do something
-	 ### update states variables
-	 prev_state = curr_state
+         #do something
+         abc=325 
+    ### update states variables
+    prev_state = curr_state
     #Set state for next iterratoins
     curr_state = new_state
     print("State changed, NEW STATE=", curr_state)
