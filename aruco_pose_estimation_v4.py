@@ -57,6 +57,7 @@ marker_visible = False
 lpos_received_time = 0
 app_should_stop = False
 copter_mode = 0
+prelanded_pos_start = 0
 # Landing precision parameters
 x_precision = 0.1
 y_precision = 0.1
@@ -72,6 +73,7 @@ MIN_OBSERVATION_PERIOD = 200   #millis
 LPOS_OBSERVATION_MILLIS = 8000 #millis
 COPTER_SYS_ID = 1
 MAX_OBSERVATION_LOST_MILLIS = 200
+MAX_PRELAND_MILLIS = 3000
 
 #define position targew for offbord mode - for first time use it only for Y-axis
 LPOS_TYPE_MASK = 0x4 and 0x38 and 0x1C0 and 0x400 and 0x800 and 0x3000
@@ -326,13 +328,20 @@ def correct_lpos():
     master.mav.set_position_target_local_ned_send(nm_time_boot_ms, nm_sys_id, 0, nm_coordinate_frame, nm_type_mask, nm_x, nm_y, nm_z, 0, 0, 0, 0, 0, 0, nm_yaw, 0)
 
 def check_for_landing():
-     global lpos_data, attitude_mav, landing_target
+     global lpos_data, attitude_mav, landing_target, prelanded_pos_start
      x_ok = abs(prelanding_target.x - lpos_x) < x_precision
      y_ok = abs(prelanding_target.y - lpos_y) < y_precision
      yaw_ok = abs(prelanding_target.yaw - prev_yaw) < yaw_precision
-     if ( x_ok and y_ok and yaw_ok ):
-         if opts.showmessages:
-              print ("OK for landing")
+     ### Check if position of copter is above landing coordinates and yaw is ok
+     preland_ok = (x_ok and y_ok and yaw_ok)
+     ### if position is good  we keep time mark of start positionning in this point or reset time mark
+     if ( preland_ok ):
+         if (prelanded_pos_start == 0):
+              prelanded_pos_start = delta_millis(start_boot)
+     else:
+         prelanded_pos_start = 0
+     ### if we keep this position for some time - initiate landing
+     if ((delta_millis(start_boot) - prelanded_pos_start) > MAX_PRELAND_MILLIS and prelanded_pos_start > 0):
          setState(State_landing)
 	
 def setState(new_state):
@@ -356,7 +365,8 @@ def setState(new_state):
               print("Call of setState correcting")
     #Set state for next iterratoins
     curr_state = new_state
-    print("State changed, NEW STATE=", curr_state)
+    if opts.showmessages:
+         print("State changed, NEW STATE=", curr_state)
 
 def waiting_mark():
     global curr_state, cap, master, first_loop, opts, yaw_copter, msg, msg_type, marker_visible, lpos_x, lpos_y
